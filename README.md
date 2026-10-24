@@ -34,9 +34,57 @@ This starter has package selection, rider forms, server-side order amount valida
 
 Never commit `.env.local`, API keys or service-role secrets. Secrets previously posted to chat should be rotated before use.
 
-## Live Excel booking log
-The app now attempts to append a row for each rider to a OneDrive/SharePoint Excel table after payment verification. Add the Microsoft environment variables from `.env.example` in Vercel, and prepare a workbook table named `Bookings` with these columns in this exact order:
+## Live Excel booking log (Power Automate)
 
+The app sends a server-side notification after a payment is verified. Configure the Microsoft Power Automate flow below to append a row for each rider to your Excel workbook. Supabase remains the primary database; the Excel log is a convenience for event staff.
+
+### 1. Prepare the workbook
+Create a workbook named `AC-Agnirasa-Bookings.xlsx` in OneDrive or SharePoint. On the first worksheet, enter these headers in row 1, select the header and an empty row below it, then use **Insert → Table** and confirm “My table has headers”. Name the table `Bookings`.
+
+Use these columns in this exact order:
 `Booking ID, Paid At, Buyer Name, Buyer Email, Buyer Mobile, Package, Amount INR, Rider Name, Rider Course, Ticket Code, Razorpay Payment ID, Payment Status`.
 
-Important: Microsoft Graph documents workbook table-row writing with delegated `Files.ReadWrite` permissions, not application permissions. The server-only client-credentials implementation may fail depending on tenant/API support. For a dependable production Excel integration, use a Power Automate flow with the Excel Online (Business) connector and trigger it from a secured server-side notification/queue. Check sync logs and verify rows in the workbook during testing; do not rely on the Excel log as the only booking record. Supabase remains the primary database.
+### 2. Create the Power Automate flow
+1. Open Power Automate and create an **Automated cloud flow** (or Instant cloud flow) with the **When an HTTP request is received** trigger.
+2. Use this JSON schema for the trigger:
+```json
+{
+  "type": "object",
+  "properties": {
+    "bookingId": { "type": "string" },
+    "paidAt": { "type": "string" },
+    "buyerName": { "type": "string" },
+    "buyerEmail": { "type": "string" },
+    "buyerMobile": { "type": "string" },
+    "packageName": { "type": "string" },
+    "amountInr": { "type": "number" },
+    "paymentId": { "type": "string" },
+    "paymentStatus": { "type": "string" },
+    "tickets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "ticketCode": { "type": "string" },
+          "riderName": { "type": "string" },
+          "riderCourse": { "type": "string" }
+        },
+        "required": ["ticketCode", "riderName", "riderCourse"]
+      }
+    }
+  },
+  "required": ["bookingId", "paidAt", "buyerName", "buyerEmail", "buyerMobile", "packageName", "amountInr", "paymentId", "paymentStatus", "tickets"]
+}
+```
+3. Add **Apply to each** and select the trigger's `tickets` array.
+4. Inside it add **Excel Online (Business) → Add a row into a table**, and select the workbook and `Bookings` table.
+5. Map the workbook columns to the trigger fields: Booking ID = `bookingId`; Paid At = `paidAt`; Buyer Name = `buyerName`; Buyer Email = `buyerEmail`; Buyer Mobile = `buyerMobile`; Package = `packageName`; Amount INR = `amountInr`; Rider Name = current ticket `riderName`; Rider Course = current ticket `riderCourse`; Ticket Code = current ticket `ticketCode`; Razorpay Payment ID = `paymentId`; Payment Status = `paymentStatus`.
+6. Save the flow and copy its generated HTTP POST URL. Treat the URL as a password because anyone with it may trigger the flow. Use an authenticated/secured trigger if your tenant offers it.
+
+### 3. Connect the app
+In Vercel → Project → Settings → Environment Variables, add `POWER_AUTOMATE_EXCEL_WEBHOOK_URL` with the generated flow URL. Redeploy the project. Do not commit the URL to GitHub or paste it in chat.
+
+Test the full flow in Razorpay test mode. A successful checkout should trigger one row for every rider. If the flow fails, inspect its run history and the deployment logs; the booking record and tickets in Supabase remain the primary records.
+
+## Production notes
+Before accepting live money, test duplicate payment callbacks, failed email/Excel sync, refunds and check-in. The admin ticket scanner and feedback page are not yet implemented. Add a privacy notice, cancellation/refund policy, support contact and event safety rules before public launch.
