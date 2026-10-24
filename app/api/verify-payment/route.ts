@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createHmac, timingSafeEqual, randomBytes } from "node:crypto";
 import { getSupabase } from "@/lib/server";
 import { emailTickets } from "@/lib/tickets";
+import { appendPaidBookingToExcel } from "@/lib/excel";
 export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
@@ -28,8 +29,18 @@ export async function POST(request: Request) {
     if (ticketError) { console.error("Ticket insert failed", ticketError); return NextResponse.json({ error: "Payment verified but ticket generation needs support. Contact event team with booking reference." }, { status: 500 }); }
     const { error: updateError } = await supabase.from("bookings").update({ status: "paid", razorpay_payment_id, paid_at: new Date().toISOString() }).eq("id", booking.id).eq("status", "pending");
     if (updateError) { console.error("Booking status update failed", updateError); return NextResponse.json({ error: "Payment verified but booking confirmation needs support." }, { status: 500 }); }
-    try { await emailTickets(booking, tickets); await supabase.from("bookings").update({ email_status: "sent" }).eq("id", booking.id); }
-    catch (e) { console.error("Ticket email failed", e); await supabase.from("bookings").update({ email_status: "failed" }).eq("id", booking.id); return NextResponse.json({ ok: true, emailPending: true, message: "Payment verified. Email is delayed; contact event support with booking reference." }); }
-    return NextResponse.json({ ok: true, message: "Payment verified and tickets emailed." });
+    const { data: paidBooking } = await supabase.from("bookings").select("*").eq("id", booking.id).single();
+    const emailTask = emailTickets(paidBooking || booking, tickets).then(async () => {
+      await supabase.from("bookings").update({ email_status: "sent" }).eq("id", booking.id);
+    }).catch(async (e) => {
+      console.error("Ticket email failed", e);
+      await supabase.from("bookings").update({ email_status: "failed" }).eq("id", booking.id);
+    });
+    const excelTask = appendPaidBookingToExcel({ ...(paidBooking || booking), riders: riderData }, tickets).then(() => true).catch((e) => {
+      console.error("Excel sync failed", e);
+      return false;
+    });
+    const [, excelSynced] = await Promise.all([emailTask, excelTask]);
+    return NextResponse.json({ ok: true, excelSynced, message: "Payment verified. Your tickets are being confirmed by email." });
   } catch (e) { console.error("Verify payment failed", e); return NextResponse.json({ error: "Could not verify payment. Do not pay again; contact event support if money was deducted." }, { status: 500 }); }
 }
