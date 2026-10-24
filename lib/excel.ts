@@ -6,81 +6,43 @@ type BookingForExcel = {
   package_name: string;
   rider_count: number;
   amount_paise: number;
-  created_at?: string;
   paid_at?: string | null;
   razorpay_payment_id?: string | null;
-  riders?: Array<{ name: string; course: string }>;
 };
 type TicketForExcel = { ticket_code: string; rider_name: string; rider_course: string };
 
-function requiredEnv(name: string) {
-  const value = process.env[name];
-  if (!value) throw new Error("Excel export is not configured: " + name);
-  return value;
-}
-
-async function graphToken() {
-  const tenant = requiredEnv("MS_TENANT_ID");
-  const clientId = requiredEnv("MS_CLIENT_ID");
-  const clientSecret = requiredEnv("MS_CLIENT_SECRET");
-  const response = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenant)}/oauth2/v2.0/token`, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      scope: "https://graph.microsoft.com/.default",
-      grant_type: "client_credentials",
-    }),
-    cache: "no-store",
-  });
-  if (!response.ok) throw new Error("Microsoft Graph token request failed: " + response.status);
-  const data = await response.json();
-  if (typeof data.access_token !== "string") throw new Error("Microsoft Graph did not return an access token.");
-  return data.access_token as string;
-}
-
 /**
- * Appends one row per rider to an Excel table in OneDrive/SharePoint using Microsoft Graph.
- * The workbook must already contain a table with matching columns.
- *
- * Note: Excel workbook table-row APIs currently document delegated Files.ReadWrite permissions
- * rather than application permissions. This client-credentials implementation may not be accepted
- * for workbook writes in your tenant; if it fails, use a delegated/Power Automate connector flow.
+ * Calls a Power Automate flow which uses the Excel Online (Business) connector.
+ * Keep the flow URL secret and store it only in server-side environment variables.
+ * The flow should append one row per ticket to a pre-created Excel table.
  */
 export async function appendPaidBookingToExcel(booking: BookingForExcel, tickets: TicketForExcel[]) {
-  const driveId = requiredEnv("MS_EXCEL_DRIVE_ID");
-  const itemId = requiredEnv("MS_EXCEL_WORKBOOK_ITEM_ID");
-  const tableName = process.env.MS_EXCEL_TABLE_NAME || "Bookings";
-  const token = await graphToken();
-
-  const rows = tickets.map((ticket) => [
-    booking.id,
-    booking.paid_at || new Date().toISOString(),
-    booking.buyer_name,
-    booking.email,
-    booking.mobile,
-    booking.package_name,
-    booking.amount_paise / 100,
-    ticket.rider_name,
-    ticket.rider_course,
-    ticket.ticket_code,
-    booking.razorpay_payment_id || "",
-    "Paid",
-  ]);
-
-  const url = `https://graph.microsoft.com/v1.0/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/workbook/tables/${encodeURIComponent(tableName)}/rows/add`;
-  const response = await fetch(url, {
+  const flowUrl = process.env.POWER_AUTOMATE_EXCEL_WEBHOOK_URL;
+  if (!flowUrl) throw new Error("Excel sync is not configured: POWER_AUTOMATE_EXCEL_WEBHOOK_URL");
+  const payload = {
+    bookingId: booking.id,
+    paidAt: booking.paid_at || new Date().toISOString(),
+    buyerName: booking.buyer_name,
+    buyerEmail: booking.email,
+    buyerMobile: booking.mobile,
+    packageName: booking.package_name,
+    amountInr: booking.amount_paise / 100,
+    paymentId: booking.razorpay_payment_id || "",
+    paymentStatus: "Paid",
+    tickets: tickets.map((ticket) => ({
+      ticketCode: ticket.ticket_code,
+      riderName: ticket.rider_name,
+      riderCourse: ticket.rider_course,
+    })),
+  };
+  const response = await fetch(flowUrl, {
     method: "POST",
-    headers: {
-      Authorization: "Bearer " + token,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ index: null, values: rows }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
     cache: "no-store",
   });
   if (!response.ok) {
     const body = await response.text();
-    throw new Error("Excel row append failed (" + response.status + "): " + body.slice(0, 500));
+    throw new Error("Power Automate Excel sync failed (" + response.status + "): " + body.slice(0, 500));
   }
 }
