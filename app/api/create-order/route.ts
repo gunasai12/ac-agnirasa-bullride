@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getRazorpay, getSupabase } from "@/lib/server";
 export const runtime = "nodejs";
+const MAX_TICKETS = 1500;
+const PENDING_HOLD_MINUTES = 30;
 const PACKAGES = { single: { name: "Single Ride", riders: 1, amount: 15000 }, duo: { name: "Duo Ride", riders: 2, amount: 28000 }, triple: { name: "Triple Thrill", riders: 3, amount: 42000 }, five: { name: "Fearless Five", riders: 6, amount: 75000 } } as const;
 const clean = (v: unknown, max: number) => typeof v === "string" ? v.trim().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, max) : "";
 
@@ -12,7 +14,6 @@ function isTrustedOrigin(origin: string): boolean {
     "https://ac-agnirasa-bullride-m319w12as-gunasais-projects.vercel.app",
     "https://ac-agnirasa-bullride-e4pimah5k-gunasais-projects.vercel.app",
   ].filter((value): value is string => Boolean(value));
-
   try {
     const requestOrigin = new URL(origin).origin;
     return trustedOrigins.some((value) => {
@@ -36,7 +37,26 @@ export async function POST(request: Request) {
     if (!Array.isArray(body.riders) || body.riders.length !== pack.riders) return NextResponse.json({ error: pack.name + " requires exactly " + pack.riders + " rider(s)." }, { status: 400 });
     const riders = body.riders.map((r: any) => ({ name: clean(r?.name, 100), course: clean(r?.course, 100) }));
     if (riders.some((r: any) => r.name.length < 2 || r.course.length < 2)) return NextResponse.json({ error: "Enter a name and course/department for every rider." }, { status: 400 });
-    const { client, key_id } = getRazorpay(), supabase = getSupabase(), bookingId = randomUUID();
+
+    const supabase = getSupabase();
+    const pendingCutoff = new Date(Date.now() - PENDING_HOLD_MINUTES * 60 * 1000).toISOString();
+    const { data: activeBookings, error: capacityError } = await supabase
+      .from("bookings")
+      .select("rider_count,status,created_at")
+      .in("status", ["paid", "pending"]);
+    if (capacityError) {
+      console.error("Ticket capacity check failed", capacityError);
+      return NextResponse.json({ error: "We could not check ticket availability. Please try again." }, { status: 503 });
+    }
+    const currentlyAllocated = (activeBookings || []).reduce((total, booking) => {
+      const active = booking.status === "paid" || (booking.status === "pending" && booking.created_at >= pendingCutoff);
+      return total + (active ? Number(booking.rider_count) : 0);
+    }, 0);
+    if (currentlyAllocated + pack.riders > MAX_TICKETS) {
+      return NextResponse.json({ error: "Sorry, this booking would exceed the 1,500-ticket event capacity. Please choose a smaller package if available." }, { status: 409 });
+    }
+
+    const { client, key_id } = getRazorpay(), bookingId = randomUUID();
     const order = await client.orders.create({ amount: pack.amount, currency: "INR", receipt: "bullride_" + bookingId.replace(/-/g, "").slice(0, 20), notes: { booking_id: bookingId, package: key } });
     const { error } = await supabase.from("bookings").insert({ id: bookingId, buyer_name: buyerName, email, mobile, package_name: pack.name, rider_count: pack.riders, amount_paise: pack.amount, currency: "INR", status: "pending", razorpay_order_id: order.id, riders });
     if (error) { console.error("Booking insert failed", error); return NextResponse.json({ error: "We could not save your booking. Please try again." }, { status: 500 }); }
