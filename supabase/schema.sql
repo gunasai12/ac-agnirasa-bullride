@@ -21,6 +21,13 @@ create table if not exists public.feedback (
   rating integer not null check (rating between 1 and 5), comment text check (char_length(comment) <= 1500),
   created_at timestamptz not null default now()
 );
+-- Configurable ticket limit, stored in the database rather than shown on the page.
+create table if not exists public.event_settings (
+  id boolean primary key default true check (id = true),
+  max_tickets integer not null default 1500 check (max_tickets > 0)
+);
+insert into public.event_settings (id, max_tickets) values (true, 1500)
+on conflict (id) do nothing;
 -- Keep existing databases compatible with the updated Fearless Five offer.
 alter table public.bookings drop constraint if exists bookings_rider_count_check;
 alter table public.bookings add constraint bookings_rider_count_check check (rider_count in (1,2,3,5,6));
@@ -29,3 +36,4 @@ alter table public.bookings add constraint bookings_amount_paise_check check (am
 alter table public.bookings enable row level security;
 alter table public.tickets enable row level security;
 alter table public.feedback enable row level security;
+alter table public.event_settings enable row level security;
