@@ -4,10 +4,34 @@ import { getRazorpay, getSupabase } from "@/lib/server";
 export const runtime = "nodejs";
 const PACKAGES = { single: { name: "Single Ride", riders: 1, amount: 15000 }, duo: { name: "Duo Ride", riders: 2, amount: 28000 }, triple: { name: "Triple Thrill", riders: 3, amount: 42000 }, five: { name: "Fearless Five", riders: 5, amount: 65000 } } as const;
 const clean = (v: unknown, max: number) => typeof v === "string" ? v.trim().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, max) : "";
+
+function isTrustedOrigin(origin: string): boolean {
+  const trustedOrigins = [
+    process.env.NEXT_PUBLIC_SITE_URL,
+    "https://ac-agnirasa-bullride.vercel.app",
+    "https://ac-agnirasa-bullride-m319w12as-gunasais-projects.vercel.app",
+  ].filter((value): value is string => Boolean(value));
+
+  try {
+    const requestOrigin = new URL(origin).origin;
+    return trustedOrigins.some((value) => {
+      try {
+        return new URL(value).origin === requestOrigin;
+      } catch {
+        return false;
+      }
+    });
+  } catch {
+    return false;
+  }
+}
+
 export async function POST(request: Request) {
   try {
-    const origin = request.headers.get("origin"), site = process.env.NEXT_PUBLIC_SITE_URL;
-    if (origin && site && new URL(origin).origin !== new URL(site).origin) return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+    const origin = request.headers.get("origin");
+    if (origin && !isTrustedOrigin(origin)) {
+      return NextResponse.json({ error: "Invalid request origin." }, { status: 403 });
+    }
     const body = await request.json();
     const buyerName = clean(body.buyerName, 100), email = clean(body.email, 254).toLowerCase(), mobile = clean(body.mobile, 18);
     const key = body.package as keyof typeof PACKAGES, pack = PACKAGES[key];
