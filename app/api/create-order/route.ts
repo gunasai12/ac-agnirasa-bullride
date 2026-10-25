@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { getRazorpay, getSupabase } from "@/lib/server";
 export const runtime = "nodejs";
-const MAX_TICKETS = 1500;
 const PENDING_HOLD_MINUTES = 30;
 const PACKAGES = { single: { name: "Single Ride", riders: 1, amount: 15000 }, duo: { name: "Duo Ride", riders: 2, amount: 28000 }, triple: { name: "Triple Thrill", riders: 3, amount: 42000 }, five: { name: "Fearless Five", riders: 6, amount: 75000 } } as const;
 const clean = (v: unknown, max: number) => typeof v === "string" ? v.trim().replace(/[\u0000-\u001f\u007f]/g, "").slice(0, max) : "";
@@ -39,6 +38,11 @@ export async function POST(request: Request) {
     if (riders.some((r: any) => r.name.length < 2 || r.course.length < 2)) return NextResponse.json({ error: "Enter a name and course/department for every rider." }, { status: 400 });
 
     const supabase = getSupabase();
+    const { data: settings, error: settingsError } = await supabase.from("event_settings").select("max_tickets").eq("id", true).single();
+    if (settingsError || !settings) {
+      console.error("Ticket capacity settings unavailable", settingsError);
+      return NextResponse.json({ error: "Ticket booking is temporarily unavailable. Please try again shortly." }, { status: 503 });
+    }
     const pendingCutoff = new Date(Date.now() - PENDING_HOLD_MINUTES * 60 * 1000).toISOString();
     const { data: activeBookings, error: capacityError } = await supabase
       .from("bookings")
@@ -52,8 +56,8 @@ export async function POST(request: Request) {
       const active = booking.status === "paid" || (booking.status === "pending" && booking.created_at >= pendingCutoff);
       return total + (active ? Number(booking.rider_count) : 0);
     }, 0);
-    if (currentlyAllocated + pack.riders > MAX_TICKETS) {
-      return NextResponse.json({ error: "Sorry, this booking would exceed the 1,500-ticket event capacity. Please choose a smaller package if available." }, { status: 409 });
+    if (currentlyAllocated + pack.riders > settings.max_tickets) {
+      return NextResponse.json({ error: "Sorry, this booking would exceed the event's ticket capacity. Please choose a smaller package if available." }, { status: 409 });
     }
 
     const { client, key_id } = getRazorpay(), bookingId = randomUUID();
