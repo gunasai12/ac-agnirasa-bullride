@@ -1,6 +1,7 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
+import QRCode from "qrcode";
 
 const packages = {
   single: { name: "Single Ride", price: 150, riders: 1, line: "One ride. A big story.", color: "gold" },
@@ -10,7 +11,6 @@ const packages = {
 } as const;
 type PackageKey = keyof typeof packages;
 type Rider = { name: string; course: string };
-declare global { interface Window { Razorpay?: new (opts: any) => { open: () => void } } }
 
 const rules = [
   "Age limit: 16+ only, as per university rules.",
@@ -34,6 +34,10 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [bookingRef, setBookingRef] = useState("");
+  const [upiQr, setUpiQr] = useState("");
+  const upiId = process.env.NEXT_PUBLIC_PHONEPE_UPI_ID || "";
+  useEffect(() => { if (upiId) QRCode.toDataURL(`upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent("AC Agnirasa Bull Ride")}&cu=INR`).then(setUpiQr).catch(() => setUpiQr("")); }, [upiId]);
 
   function selectPackage(key: PackageKey) {
     setChosen(key);
@@ -44,35 +48,15 @@ export default function Home() {
     setRiders(old => old.map((r, j) => i === j ? { ...r, [field]: value } : r));
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); setBusy(true); setError(""); setNotice("");
+    event.preventDefault(); setBusy(true); setError(""); setNotice(""); setBookingRef("");
     try {
       const response = await fetch("/api/create-order", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ buyerName, email, mobile, riders, package: chosen }) });
-      const order = await response.json();
-      if (!response.ok) throw new Error(order.error || "Could not start checkout.");
-      const script = document.createElement("script");
-      script.src = "https://checkout.razorpay.com/v1/checkout.js";
-      script.onload = () => {
-        if (!window.Razorpay) { setError("Payment checkout could not load."); setBusy(false); return; }
-        new window.Razorpay({
-          key: order.keyId, amount: order.amount, currency: order.currency, order_id: order.orderId,
-          name: "AC Agnirasa Bull Ride", description: packages[chosen].name,
-          prefill: { name: buyerName, email, contact: mobile }, notes: { bookingId: order.bookingId },
-          theme: { color: "#ffcf19" },
-          handler: async (payment: any) => {
-            try {
-              const verified = await fetch("/api/verify-payment", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...payment, bookingId: order.bookingId }) });
-              const result = await verified.json();
-              if (!verified.ok) throw new Error(result.error || "Payment verification failed.");
-              setNotice("Payment verified! Your booking is confirmed. Ticket email delivery may take a moment; check your inbox and spam folder.");
-            } catch (e) { setError(e instanceof Error ? e.message : "Payment verification failed."); }
-            finally { setBusy(false); }
-          },
-          modal: { ondismiss: () => setBusy(false) }
-        }).open();
-      };
-      script.onerror = () => { setError("Could not load Razorpay checkout."); setBusy(false); };
-      document.body.appendChild(script);
-    } catch (e) { setError(e instanceof Error ? e.message : "Something went wrong."); setBusy(false); }
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not save your booking.");
+      setBookingRef(result.bookingId);
+      setNotice("Booking saved. Scan the PhonePe UPI QR below and pay the exact amount. Your ticket will be emailed only after an admin verifies the payment.");
+    } catch (e) { setError(e instanceof Error ? e.message : "Something went wrong."); }
+    finally { setBusy(false); }
   }
 
   return <main>
@@ -82,7 +66,7 @@ export default function Home() {
     <section className="packages" id="tickets"><div className="section-title"><span>✦</span> PICK YOUR RIDE <span>✦</span></div><p className="section-subtitle">Choose a ticket package. Select it to start your booking.</p><div className="ticket-grid">
       {(Object.keys(packages) as PackageKey[]).map(key => <article className={"ticket-card ticket-" + packages[key].color + (chosen === key ? " selected" : "")} key={key}><div className="ticket-top"><span className="ticket-label">{packages[key].name}</span><span className="ticket-icon">⚡</span></div><div className="ticket-art" aria-hidden="true"><span>♞</span><i>✦</i></div><p className="ticket-price">₹{packages[key].price}</p><p className="ticket-desc">{packages[key].line}</p><p className="ticket-count">{packages[key].riders} RIDER{packages[key].riders === 1 ? "" : "S"} / TICKETS</p><button type="button" className="card-link" onClick={() => { selectPackage(key); document.getElementById("book")?.scrollIntoView({ behavior: "smooth" }); }}>{chosen === key ? "SELECTED ✓" : "SELECT PACKAGE →"}</button></article>)}
     </div><div className="offer-banner"><div className="offer-icon">🏆</div><div><p className="eyebrow">STAY ON & WIN!</p><h3>RIDE WITHOUT FALLING</h3><p>Get a chance to win a ₹50 Diet Coke prize. 5–10 winners advertised by the event team; ask the on-site operator for eligibility and prize rules.</p></div><span className="offer-price">₹50<small>PRIZE</small></span></div></section>
-    <section className="booking-section" id="book"><div className="booking-intro"><p className="eyebrow">YOUR NEXT STORY STARTS HERE</p><h2>BOOK YOUR<br/><span>{packages[chosen].name.toUpperCase()}</span></h2><p>{packages[chosen].line}</p><ul className="benefits"><li>✓ {packages[chosen].riders} individual QR tickets</li><li>✓ Secure online checkout</li><li>✓ Payment verification before ticket confirmation</li><li>✓ Event safety rules apply to every rider</li></ul><div className="price-box"><small>TOTAL PACKAGE PRICE</small><strong>₹{packages[chosen].price}</strong><span>{packages[chosen].riders} TICKET{packages[chosen].riders === 1 ? "" : "S"}</span></div><p className="small-note">Fearless Five includes 6 tickets for ₹750, as shown on the event poster.</p></div>
+    <section className="booking-section" id="book"><div className="booking-intro"><p className="eyebrow">YOUR NEXT STORY STARTS HERE</p><h2>BOOK YOUR<br/><span>{packages[chosen].name.toUpperCase()}</span></h2><p>{packages[chosen].line}</p><ul className="benefits"><li>✓ {packages[chosen].riders} individual QR tickets</li><li>✓ Common PhonePe UPI QR payment</li><li>✓ Admin verifies payment before tickets are issued</li><li>✓ Event safety rules apply to every rider</li></ul><div className="price-box"><small>TOTAL PACKAGE PRICE</small><strong>₹{packages[chosen].price}</strong><span>{packages[chosen].riders} TICKET{packages[chosen].riders === 1 ? "" : "S"}</span></div><p className="small-note">Fearless Five includes 6 tickets for ₹750, as shown on the event poster.</p></div>
     <form className="booking-form" onSubmit={submit}><h3><span>01</span> Booking details</h3><p className="muted">Who should receive the booking confirmation?</p>
       <label>Buyer full name *<input required minLength={2} maxLength={100} autoComplete="name" value={buyerName} onChange={e => setBuyerName(e.target.value)} placeholder="Enter your full name"/></label>
       <div className="form-row"><label>Email address *<input required type="email" maxLength={254} autoComplete="email" value={email} onChange={e => setEmail(e.target.value.trim())} placeholder="you@example.com"/></label><label>Mobile number *<input required type="tel" pattern="[+]?[0-9 ()-]{8,18}" value={mobile} onChange={e => setMobile(e.target.value)} placeholder="+91 98765 43210"/></label></div>
@@ -90,7 +74,7 @@ export default function Home() {
       {riders.map((r, i) => <div className="rider-card" key={i}><strong>RIDER {String(i + 1).padStart(2, "0")}</strong><label>Rider full name *<input required minLength={2} maxLength={100} value={r.name} onChange={e => updateRider(i, "name", e.target.value)} placeholder={"Rider " + (i + 1) + " full name"}/></label><label>Course / department *<input required minLength={2} maxLength={100} value={r.course} onChange={e => updateRider(i, "course", e.target.value)} placeholder="e.g. B.Tech CSE"/></label></div>)}
       <label className="consent"><input type="checkbox" required/> I confirm these details are correct and agree to follow the event rules and safety instructions.</label>
       {error && <p className="message error" role="alert">{error}</p>}{notice && <p className="message success" role="status">{notice}</p>}
-      <button className="pay-btn" disabled={busy} type="submit">{busy ? "PREPARING CHECKOUT…" : "PAY ₹" + packages[chosen].price + " & GET TICKETS →"}</button><p className="secure-note">Secure checkout · Tickets are issued after payment verification</p>
+      <button className="pay-btn" disabled={busy} type="submit">{busy ? "SAVING BOOKING…" : "SAVE BOOKING & SHOW PAYMENT QR →"}</button><p className="secure-note">Booking is pending until an admin verifies payment. Do not send payment screenshots as proof of payment.</p>{bookingRef && <div className="payment-pending" style={{marginTop:20,padding:20,border:"1px solid #d6b43b",borderRadius:12}}><h3>Booking saved — reference {bookingRef.slice(0,8).toUpperCase()}</h3><p>Pay exactly ₹{packages[chosen].price} using PhonePe, then keep the UPI transaction ID/UTR for reference.</p>{upiQr ? <img src={upiQr} alt="Common PhonePe UPI payment QR code" width="240" height="240" style={{display:"block",margin:"16px auto",background:"#fff",padding:12,borderRadius:8}} /> : <p><strong>Payment QR is not configured yet.</strong> Add NEXT_PUBLIC_PHONEPE_UPI_ID in Vercel using your actual PhonePe UPI ID, then redeploy.</p>}<p>Enter the booking reference in the UPI payment note if your app allows it. Tickets are not issued automatically; the event admin will verify the received payment first.</p></div>}
     </form></section>
     <section className="rules-section"><div className="section-title"><span>✦</span> INSTRUCTIONS & RULES <span>✦</span></div><p className="section-subtitle">Follow the operator’s instructions to keep the ride safe for everyone.</p><div className="rules-grid">{rules.map((rule, i) => <div className="rule" key={rule}><b>{String(i + 1).padStart(2, "0")}</b><p>{rule}</p></div>)}</div></section>
     <section className="how"><div className="section-title"><span>✦</span> HOW IT WORKS <span>✦</span></div><div className="steps">{["Choose a package","Enter rider details","Pay securely","Show QR and ride"].map((s,i)=><div key={s}><b>{i+1}</b><h3>{s}</h3><p>{["Select the ride package that fits your group.","Add buyer contact details and each rider’s name and course.","Complete checkout and wait for payment verification.","Show each rider’s QR ticket to the event team."][i]}</p></div>)}</div></section>
