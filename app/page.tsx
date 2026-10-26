@@ -36,6 +36,9 @@ export default function Home() {
   const [notice, setNotice] = useState("");
   const [bookingRef, setBookingRef] = useState("");
   const [upiQr, setUpiQr] = useState("");
+  const [paymentScreenshot, setPaymentScreenshot] = useState<File | null>(null);
+  const [paymentReference, setPaymentReference] = useState("");
+  const [uploadBusy, setUploadBusy] = useState(false);
   const upiId = process.env.NEXT_PUBLIC_PHONEPE_UPI_ID || "";
   useEffect(() => { if (upiId) QRCode.toDataURL(`upi://pay?pa=${encodeURIComponent(upiId)}&pn=${encodeURIComponent("AC Agnirasa Bull Ride")}&cu=INR`).then(setUpiQr).catch(() => setUpiQr("")); }, [upiId]);
 
@@ -59,6 +62,26 @@ export default function Home() {
     finally { setBusy(false); }
   }
 
+  async function submitPaymentEvidence(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!bookingRef) return;
+    if (!paymentScreenshot) { setError("Please choose your payment screenshot."); return; }
+    if (paymentReference.trim().length < 6) { setError("Enter your UPI transaction ID / UTR."); return; }
+    setUploadBusy(true); setError(""); setNotice("");
+    try {
+      const form = new FormData();
+      form.append("bookingId", bookingRef);
+      form.append("paymentReference", paymentReference.trim());
+      form.append("screenshot", paymentScreenshot);
+      const response = await fetch("/api/payment-screenshot", { method: "POST", body: form });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not submit payment evidence.");
+      setNotice(result.message || "Payment evidence submitted.");
+      setPaymentScreenshot(null);
+    } catch (e) { setError(e instanceof Error ? e.message : "Could not submit payment evidence."); }
+    finally { setUploadBusy(false); }
+  }
+
   return <main>
     <div className="top-strip"><span>⚡ UDYAMI BAZAAR</span><span>GD GOENKA UNIVERSITY</span><span>30 OCTOBER 2026</span></div>
     <nav className="nav"><a className="brand" href="#"><small>AC AGNIRASA PRESENTS</small><b>BULL <span>RIDE</span></b><em>DARE · RIDE · DOMINATE</em></a><a className="nav-cta" href="#book">GET TICKETS <span>↗</span></a></nav>
@@ -74,7 +97,20 @@ export default function Home() {
       {riders.map((r, i) => <div className="rider-card" key={i}><strong>RIDER {String(i + 1).padStart(2, "0")}</strong><label>Rider full name *<input required minLength={2} maxLength={100} value={r.name} onChange={e => updateRider(i, "name", e.target.value)} placeholder={"Rider " + (i + 1) + " full name"}/></label><label>Course / department *<input required minLength={2} maxLength={100} value={r.course} onChange={e => updateRider(i, "course", e.target.value)} placeholder="e.g. B.Tech CSE"/></label></div>)}
       <label className="consent"><input type="checkbox" required/> I confirm these details are correct and agree to follow the event rules and safety instructions.</label>
       {error && <p className="message error" role="alert">{error}</p>}{notice && <p className="message success" role="status">{notice}</p>}
-      <button className="pay-btn" disabled={busy} type="submit">{busy ? "SAVING BOOKING…" : "SAVE BOOKING & SHOW PAYMENT QR →"}</button><p className="secure-note">Booking is pending until an admin verifies payment. Do not send payment screenshots as proof of payment.</p>{bookingRef && <div className="payment-pending" style={{marginTop:20,padding:20,border:"1px solid #d6b43b",borderRadius:12}}><h3>Booking saved — reference {bookingRef.slice(0,8).toUpperCase()}</h3><p>Pay exactly ₹{packages[chosen].price} using PhonePe, then keep the UPI transaction ID/UTR for reference.</p>{upiQr ? <img src={upiQr} alt="Common PhonePe UPI payment QR code" width="240" height="240" style={{display:"block",margin:"16px auto",background:"#fff",padding:12,borderRadius:8}} /> : <p><strong>Payment QR is not configured yet.</strong> Add NEXT_PUBLIC_PHONEPE_UPI_ID in Vercel using your actual PhonePe UPI ID, then redeploy.</p>}<p>Enter the booking reference in the UPI payment note if your app allows it. Tickets are not issued automatically; the event admin will verify the received payment first.</p></div>}
+      <button className="pay-btn" disabled={busy} type="submit">{busy ? "SAVING BOOKING…" : "SAVE BOOKING & SHOW PAYMENT QR →"}</button><p className="secure-note">Booking remains pending until the admin verifies your actual payment. Upload your screenshot and transaction ID below.</p>{bookingRef && <div className="payment-pending" style={{marginTop:20,padding:20,border:"1px solid #d6b43b",borderRadius:12}}><h3>Booking saved — reference {bookingRef.slice(0,8).toUpperCase()}</h3><p>Pay exactly ₹{packages[chosen].price} using PhonePe, then keep the UPI transaction ID/UTR for reference.</p>{upiQr ? <img src={upiQr} alt="Common PhonePe UPI payment QR code" width="240" height="240" style={{display:"block",margin:"16px auto",background:"#fff",padding:12,borderRadius:8}} /> : <p><strong>Payment QR is not configured yet.</strong> Add NEXT_PUBLIC_PHONEPE_UPI_ID in Vercel using your actual PhonePe UPI ID, then redeploy.</p>}<p>Enter the booking reference in the UPI payment note if your app allows it. Tickets are not issued automatically; the event admin will verify the received payment first.</p>
+      <form onSubmit={submitPaymentEvidence} style={{display:"grid",gap:12,marginTop:18,textAlign:"left"}}>
+        <h4 style={{margin:"8px 0"}}>Upload payment screenshot</h4>
+        <label>UPI transaction ID / UTR *
+          <input required minLength={6} maxLength={100} value={paymentReference} onChange={e=>setPaymentReference(e.target.value)} placeholder="Enter transaction ID from PhonePe" />
+        </label>
+        <label>Payment screenshot * (JPG, PNG or WEBP; maximum 5 MB)
+          <input required type="file" accept="image/jpeg,image/png,image/webp" onChange={e=>setPaymentScreenshot(e.target.files?.[0] || null)} />
+        </label>
+        {paymentScreenshot && <p>Selected: {paymentScreenshot.name}</p>}
+        <button className="pay-btn" disabled={uploadBusy} type="submit">{uploadBusy ? "UPLOADING…" : "SUBMIT PAYMENT EVIDENCE →"}</button>
+        <p className="secure-note">Your screenshot is stored privately for admin review. A screenshot alone does not confirm payment.</p>
+      </form>
+      </div>}
     </form></section>
     <section className="rules-section"><div className="section-title"><span>✦</span> INSTRUCTIONS & RULES <span>✦</span></div><p className="section-subtitle">Follow the operator’s instructions to keep the ride safe for everyone.</p><div className="rules-grid">{rules.map((rule, i) => <div className="rule" key={rule}><b>{String(i + 1).padStart(2, "0")}</b><p>{rule}</p></div>)}</div></section>
     <section className="how"><div className="section-title"><span>✦</span> HOW IT WORKS <span>✦</span></div><div className="steps">{["Choose a package","Enter rider details","Pay securely","Show QR and ride"].map((s,i)=><div key={s}><b>{i+1}</b><h3>{s}</h3><p>{["Select the ride package that fits your group.","Add buyer contact details and each rider’s name and course.","Complete checkout and wait for payment verification.","Show each rider’s QR ticket to the event team."][i]}</p></div>)}</div></section>
