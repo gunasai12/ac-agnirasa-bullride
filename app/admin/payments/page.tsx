@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 
-type Booking = { id: string; buyer_name: string; email: string; mobile: string; package_name: string; rider_count: number; amount_paise: number; created_at: string; riders: { name: string; course: string }[] };
+type Booking = { id: string; buyer_name: string; email: string; mobile: string; package_name: string; rider_count: number; amount_paise: number; created_at: string; payment_reference: string | null; payment_screenshot_path: string | null; payment_screenshot_url: string | null; riders: { name: string; course: string }[] };
 
 export default function AdminPaymentsPage() {
   const [token, setToken] = useState("");
@@ -37,7 +37,7 @@ export default function AdminPaymentsPage() {
   }
 
   async function verify(bookingId: string) {
-    const paymentReference = (references[bookingId] || "").trim();
+    const paymentReference = (references[bookingId] || bookings.find(b => b.id === bookingId)?.payment_reference || "").trim();
     if (paymentReference.length < 6) { setMessage("Enter the transaction reference/UTR after checking the actual credit in PhonePe/bank history."); return; }
     if (!window.confirm("Confirm you have independently checked the actual received payment and the exact amount in PhonePe/bank history? This will mark the booking paid and attempt to email tickets.")) return;
     setBusy(true); setMessage("");
@@ -66,8 +66,14 @@ export default function AdminPaymentsPage() {
         <p><strong>Buyer:</strong> {b.buyer_name} · {b.mobile} · {b.email}</p>
         <p><strong>Created:</strong> {new Date(b.created_at).toLocaleString()}</p>
         <p><strong>Riders:</strong> {b.riders.map(r=>r.name+" ("+r.course+")").join(", ")}</p>
+        <p><strong>Customer UPI reference:</strong> {b.payment_reference || "Not submitted yet"}</p>
+        <div style={{margin:"14px 0",padding:12,background:"#f7f7f7",borderRadius:8}}>
+          <strong>Payment screenshot</strong>
+          {b.payment_screenshot_url ? <a href={b.payment_screenshot_url} target="_blank" rel="noreferrer"><img src={b.payment_screenshot_url} alt={"Payment screenshot for booking "+b.id} style={{display:"block",maxWidth:"100%",width:360,maxHeight:420,objectFit:"contain",marginTop:10,border:"1px solid #ddd",background:"#fff"}} /></a> : <p>No screenshot uploaded yet.</p>}
+          <small>Private preview link expires after 10 minutes. Refresh the queue to generate a new link.</small>
+        </div>
         <label style={{display:"block",margin:"12px 0"}}>PhonePe transaction ID / UTR
-          <input value={references[b.id] || ""} onChange={e=>setReferences(old=>({...old,[b.id]:e.target.value}))} placeholder="Enter transaction reference after checking actual credit" style={{display:"block",width:"100%",maxWidth:520,padding:10,marginTop:6}} />
+          <input value={references[b.id] ?? b.payment_reference ?? ""} onChange={e=>setReferences(old=>({...old,[b.id]:e.target.value}))} placeholder="Enter transaction reference after checking actual credit" style={{display:"block",width:"100%",maxWidth:520,padding:10,marginTop:6}} />
         </label>
         <div style={{display:"flex",gap:10,flexWrap:"wrap"}}><button disabled={busy} onClick={()=>verify(b.id)} style={{padding:"12px 18px",background:"#151515",color:"#fff",border:0,borderRadius:6,cursor:"pointer"}}>Verify payment & issue tickets</button><button disabled={busy} onClick={()=>cancel(b.id)} style={{padding:"12px 18px",background:"#fff",color:"#8b1a1a",border:"1px solid #8b1a1a",borderRadius:6,cursor:"pointer"}}>Cancel unpaid booking</button></div>
       </article>)}
