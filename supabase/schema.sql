@@ -45,3 +45,8 @@ alter table public.bookings add column if not exists payment_reference text;
 alter table public.bookings add column if not exists admin_note text;
 alter table public.bookings add column if not exists verified_at timestamptz;
 alter table public.bookings add column if not exists verified_by text;
+
+-- Prevent the same UPI transaction reference from being used for two bookings.
+create unique index if not exists bookings_payment_reference_unique
+on public.bookings (payment_reference)
+where payment_reference is not null and payment_reference <> '';
