@@ -23,6 +23,19 @@ export default function AdminPaymentsPage() {
     finally { setBusy(false); }
   }
 
+  async function cancel(bookingId: string) {
+    if (!window.confirm("Cancel this booking only after checking that no payment was received? This releases its reserved ticket capacity.")) return;
+    setBusy(true); setMessage("");
+    try {
+      const response = await fetch("/api/admin/manual-payments", { method: "POST", headers: { "Content-Type": "application/json", "x-admin-token": token }, body: JSON.stringify({ bookingId, action: "cancel" }) });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Could not cancel booking.");
+      setMessage(result.message);
+      await loadQueue();
+    } catch (e) { setMessage(e instanceof Error ? e.message : "Request failed."); }
+    finally { setBusy(false); }
+  }
+
   async function verify(bookingId: string) {
     const paymentReference = (references[bookingId] || "").trim();
     if (paymentReference.length < 6) { setMessage("Enter the transaction reference/UTR after checking the actual credit in PhonePe/bank history."); return; }
@@ -56,7 +69,7 @@ export default function AdminPaymentsPage() {
         <label style={{display:"block",margin:"12px 0"}}>PhonePe transaction ID / UTR
           <input value={references[b.id] || ""} onChange={e=>setReferences(old=>({...old,[b.id]:e.target.value}))} placeholder="Enter transaction reference after checking actual credit" style={{display:"block",width:"100%",maxWidth:520,padding:10,marginTop:6}} />
         </label>
-        <button disabled={busy} onClick={()=>verify(b.id)} style={{padding:"12px 18px",background:"#151515",color:"#fff",border:0,borderRadius:6,cursor:"pointer"}}>Verify payment & issue tickets</button>
+        <div style={{display:"flex",gap:10,flexWrap:"wrap"}}><button disabled={busy} onClick={()=>verify(b.id)} style={{padding:"12px 18px",background:"#151515",color:"#fff",border:0,borderRadius:6,cursor:"pointer"}}>Verify payment & issue tickets</button><button disabled={busy} onClick={()=>cancel(b.id)} style={{padding:"12px 18px",background:"#fff",color:"#8b1a1a",border:"1px solid #8b1a1a",borderRadius:6,cursor:"pointer"}}>Cancel unpaid booking</button></div>
       </article>)}
     </section>
     {bookings.length===0 && <p>No bookings displayed. Load the queue to check pending bookings.</p>}
