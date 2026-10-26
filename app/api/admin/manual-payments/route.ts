@@ -26,9 +26,16 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const bookingId = typeof body.bookingId === "string" ? body.bookingId : "";
+    const action = body.action === "cancel" ? "cancel" : "verify";
     const paymentReference = typeof body.paymentReference === "string" ? body.paymentReference.trim().slice(0, 100) : "";
-    if (!bookingId || paymentReference.length < 6) return NextResponse.json({ error: "Booking reference and UPI transaction reference/UTR are required." }, { status: 400 });
+    if (!bookingId) return NextResponse.json({ error: "Booking reference is required." }, { status: 400 });
+    if (action === "verify" && paymentReference.length < 6) return NextResponse.json({ error: "UPI transaction reference/UTR is required." }, { status: 400 });
     const supabase = getSupabase();
+    if (action === "cancel") {
+      const { data: cancelled, error: cancelError } = await supabase.from("bookings").update({ status: "cancelled", admin_note: "Cancelled by admin after checking payment status." }).eq("id", bookingId).eq("status", "pending").select("id").maybeSingle();
+      if (cancelError || !cancelled) return NextResponse.json({ error: "Could not cancel booking. It may no longer be pending." }, { status: 409 });
+      return NextResponse.json({ ok: true, message: "Unpaid booking cancelled and capacity released." });
+    }
     const { data: booking, error: readError } = await supabase.from("bookings").select("*").eq("id", bookingId).single();
     if (readError || !booking) return NextResponse.json({ error: "Booking not found." }, { status: 404 });
     if (booking.status === "paid") return NextResponse.json({ ok: true, message: "This booking is already confirmed." });
