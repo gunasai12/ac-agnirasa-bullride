@@ -37,3 +37,11 @@ alter table public.bookings enable row level security;
 alter table public.tickets enable row level security;
 alter table public.feedback enable row level security;
 alter table public.event_settings enable row level security;
+
+-- Manual PhonePe UPI workflow: retain old Razorpay columns for existing records, but allow new manual bookings.
+alter table public.bookings alter column razorpay_order_id drop not null;
+alter table public.bookings add column if not exists payment_method text not null default 'razorpay';
+alter table public.bookings add column if not exists payment_reference text;
+alter table public.bookings add column if not exists admin_note text;
+alter table public.bookings add column if not exists verified_at timestamptz;
+alter table public.bookings add column if not exists verified_by text;
