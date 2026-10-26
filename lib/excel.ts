@@ -8,6 +8,7 @@ type BookingForExcel = {
   amount_paise: number;
   paid_at?: string | null;
   razorpay_payment_id?: string | null;
+  payment_reference?: string | null;
 };
 type TicketForExcel = { ticket_code: string; rider_name: string; rider_course: string };
 
@@ -27,7 +28,7 @@ export async function appendPaidBookingToExcel(booking: BookingForExcel, tickets
     buyerMobile: booking.mobile,
     packageName: booking.package_name,
     amountInr: booking.amount_paise / 100,
-    paymentId: booking.razorpay_payment_id || "",
+    paymentId: booking.payment_reference || booking.razorpay_payment_id || "",
     paymentStatus: "Paid",
     tickets: tickets.map((ticket) => ({
       ticketCode: ticket.ticket_code,
