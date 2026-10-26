@@ -16,9 +16,17 @@ function authorised(request: Request) {
 export async function GET(request: Request) {
   if (!authorised(request)) return NextResponse.json({ error: "Admin access denied." }, { status: 401 });
   const supabase = getSupabase();
-  const { data, error } = await supabase.from("bookings").select("id,buyer_name,email,mobile,package_name,rider_count,amount_paise,status,payment_reference,created_at,riders").eq("status", "pending").order("created_at", { ascending: true }).limit(200);
+  const { data, error } = await supabase.from("bookings").select("id,buyer_name,email,mobile,package_name,rider_count,amount_paise,status,payment_reference,payment_screenshot_path,created_at,riders").eq("status", "pending").order("created_at", { ascending: true }).limit(200);
   if (error) return NextResponse.json({ error: "Could not load pending bookings." }, { status: 500 });
-  return NextResponse.json({ bookings: data || [] });
+  const bookings = await Promise.all((data || []).map(async (booking) => {
+    let payment_screenshot_url: string | null = null;
+    if (booking.payment_screenshot_path) {
+      const { data: signed, error: signError } = await supabase.storage.from("payment-screenshots").createSignedUrl(booking.payment_screenshot_path, 600);
+      if (!signError) payment_screenshot_url = signed.signedUrl;
+    }
+    return { ...booking, payment_screenshot_url };
+  }));
+  return NextResponse.json({ bookings });
 }
 
 export async function POST(request: Request) {
